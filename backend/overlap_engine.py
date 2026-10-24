@@ -1,7 +1,7 @@
 
+import os
 from datetime import date, datetime
 from pathlib import Path
-import os
 
 import psycopg
 from dotenv import load_dotenv
@@ -35,7 +35,7 @@ def normalize_text(value):
 
 
 def date_score(date_a, date_b):
-    """Return points based on how close the complaint dates are."""
+    """Return points based on complaint-date proximity."""
     if not date_a or not date_b:
         return 0, None
 
@@ -63,20 +63,43 @@ def date_score(date_a, date_b):
 
 def score_pair(case_a, case_b):
     """
-    Score a cross-bureau candidate pair.
+    Score candidate evidence without claiming a match is confirmed.
 
-    Maximum score: 100.
-    This is an explainable heuristic, not a probability.
+    Same institution: up to 100 points.
+    Same group, different campuses: up to 80 points.
     """
-    score = 35
-    reasons = ["Same canonical institution"]
+    reasons = []
+    score = 0
 
-    if (
-        case_a.get("category")
-        and case_b.get("category")
-        and normalize_text(case_a["category"])
-        == normalize_text(case_b["category"])
-    ):
+    institution_a = case_a.get("institution_id")
+    institution_b = case_b.get("institution_id")
+
+    group_a = case_a.get("group_id")
+    group_b = case_b.get("group_id")
+
+    same_institution = (
+        institution_a is not None
+        and institution_a == institution_b
+    )
+
+    same_group = (
+        group_a is not None
+        and group_a == group_b
+    )
+
+    if same_institution:
+        score += 35
+        reasons.append("Same canonical institution")
+    elif same_group:
+        score += 15
+        reasons.append("Same institution group; campuses may differ")
+    else:
+        reasons.append("No shared institution or group evidence")
+
+    category_a = normalize_text(case_a.get("category"))
+    category_b = normalize_text(case_b.get("category"))
+
+    if category_a and category_a == category_b:
         score += 20
         reasons.append("Same complaint category")
 
@@ -87,9 +110,7 @@ def score_pair(case_a, case_b):
 
     if text_a and text_b:
         text_similarity = fuzz.token_set_ratio(text_a, text_b)
-
-        text_points = round(30 * text_similarity / 100, 2)
-        score += text_points
+        score += round(30 * text_similarity / 100, 2)
 
         if text_similarity >= 85:
             reasons.append("Very similar complaint text")
@@ -114,16 +135,18 @@ def score_pair(case_a, case_b):
         "score": round(min(score, 100), 2),
         "text_similarity": round(text_similarity, 2),
         "days_apart": days_apart,
+        "same_institution": same_institution,
+        "same_group": same_group,
         "reasons": reasons,
     }
 
 
 def find_overlap_candidates(limit=50, minimum_score=50):
     """
-    Find and rank cross-bureau candidates sharing an institution.
+    Rank cross-bureau candidate pairs sharing an institution
+    or an institution group.
 
-    Restricted complaints are excluded from this initial engine.
-    This function reads records only; it never creates case links.
+    Restricted complaints are excluded. No case links are written.
     """
     if not 1 <= limit <= 200:
         raise ValueError("limit must be between 1 and 200")
@@ -139,31 +162,41 @@ def find_overlap_candidates(limit=50, minimum_score=50):
                     a.case_id AS case_a_id,
                     a.case_ref AS case_a_ref,
                     a.source_system AS source_a,
-                    a.institution_id,
-                    a.institution_name_raw AS institution_name_a,
+                    a.institution_id AS institution_a_id,
+                    a.group_id AS group_a_id,
                     a.category AS category_a,
                     a.text AS text_a,
-                    a.received_date AS received_date_a,
+                    a.received_date AS date_a,
 
                     b.case_id AS case_b_id,
                     b.case_ref AS case_b_ref,
                     b.source_system AS source_b,
-                    b.institution_name_raw AS institution_name_b,
+                    b.institution_id AS institution_b_id,
+                    b.group_id AS group_b_id,
                     b.category AS category_b,
                     b.text AS text_b,
-                    b.received_date AS received_date_b
+                    b.received_date AS date_b
 
                 FROM public.complaint_cases AS a
                 JOIN public.complaint_cases AS b
-                  ON a.institution_id = b.institution_id
+                  ON a.case_id < b.case_id
                  AND a.source_system <> b.source_system
-                 AND a.case_id < b.case_id
+                 AND (
+                     (
+                         a.institution_id IS NOT NULL
+                         AND a.institution_id = b.institution_id
+                     )
+                     OR
+                     (
+                         a.group_id IS NOT NULL
+                         AND a.group_id = b.group_id
+                     )
+                 )
 
-                WHERE a.institution_id IS NOT NULL
-                  AND COALESCE(a.is_restricted, FALSE) = FALSE
+                WHERE COALESCE(a.is_restricted, FALSE) = FALSE
                   AND COALESCE(b.is_restricted, FALSE) = FALSE
 
-                ORDER BY a.institution_id, a.case_id, b.case_id
+                ORDER BY a.case_id, b.case_id
                 """
             )
             rows = cur.fetchall()
@@ -172,25 +205,19 @@ def find_overlap_candidates(limit=50, minimum_score=50):
 
     for row in rows:
         case_a = {
-            "case_id": row["case_a_id"],
-            "case_ref": row["case_a_ref"],
-            "source_system": row["source_a"],
-            "institution_id": row["institution_id"],
-            "institution_name_raw": row["institution_name_a"],
+            "institution_id": row["institution_a_id"],
+            "group_id": row["group_a_id"],
             "category": row["category_a"],
             "text": row["text_a"],
-            "received_date": row["received_date_a"],
+            "received_date": row["date_a"],
         }
 
         case_b = {
-            "case_id": row["case_b_id"],
-            "case_ref": row["case_b_ref"],
-            "source_system": row["source_b"],
-            "institution_id": row["institution_id"],
-            "institution_name_raw": row["institution_name_b"],
+            "institution_id": row["institution_b_id"],
+            "group_id": row["group_b_id"],
             "category": row["category_b"],
             "text": row["text_b"],
-            "received_date": row["received_date_b"],
+            "received_date": row["date_b"],
         }
 
         evidence = score_pair(case_a, case_b)
@@ -198,14 +225,23 @@ def find_overlap_candidates(limit=50, minimum_score=50):
         if evidence["score"] < minimum_score:
             continue
 
+        if evidence["same_institution"]:
+            scope = "institution"
+        elif evidence["same_group"]:
+            scope = "group"
+        else:
+            continue
+
         candidates.append({
-            "case_a": case_a["case_ref"],
-            "case_b": case_b["case_ref"],
-            "source_a": case_a["source_system"],
-            "source_b": case_b["source_system"],
-            "institution_id": case_a["institution_id"],
-            "category_a": case_a["category"],
-            "category_b": case_b["category"],
+            "case_a": row["case_a_ref"],
+            "case_b": row["case_b_ref"],
+            "source_a": row["source_a"],
+            "source_b": row["source_b"],
+            "institution_a_id": row["institution_a_id"],
+            "institution_b_id": row["institution_b_id"],
+            "scope": scope,
+            "category_a": row["category_a"],
+            "category_b": row["category_b"],
             "score": evidence["score"],
             "text_similarity": evidence["text_similarity"],
             "days_apart": evidence["days_apart"],
@@ -214,7 +250,7 @@ def find_overlap_candidates(limit=50, minimum_score=50):
         })
 
     candidates.sort(
-        key=lambda candidate: candidate["score"],
+        key=lambda item: item["score"],
         reverse=True,
     )
 
@@ -225,7 +261,7 @@ def find_overlap_candidates(limit=50, minimum_score=50):
         "items": candidates[:limit],
         "note": (
             "Scores are heuristic rankings, not probabilities. "
-            "Candidates require human review. Restricted complaints "
-            "are excluded from this initial engine."
+            "Every candidate requires human review. Restricted "
+            "complaints are excluded."
         ),
     }
