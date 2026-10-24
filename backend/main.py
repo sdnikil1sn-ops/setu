@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from institution_resolution import resolve_institution
 
 from overlap_engine import find_overlap_candidates
+from embedding_provider import semantic_similarity
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -303,6 +304,75 @@ def resolve_institution_api(request: InstitutionResolutionRequest):
             status_code=503,
             detail="Institution resolution could not be completed",
         )
+
+@app.get("/api/v1/overlaps/candidates")
+def get_overlap_candidates(
+    limit: int = Query(default=20, ge=1, le=100),
+    minimum_score: float = Query(default=50, ge=0, le=100),
+):
+    """
+    Return ranked cross-bureau complaint candidates.
+    This endpoint is read-only; all candidates require human review.
+    """
+    try:
+        return find_overlap_candidates(
+            limit=limit,
+            minimum_score=minimum_score,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not retrieve overlap candidates",
+        )
+        
+
+class SemanticCheckRequest(BaseModel):
+    """Synthetic or explicitly authorized test texts only."""
+
+    text_a: str = Field(min_length=1, max_length=3000)
+    text_b: str = Field(min_length=1, max_length=3000)
+
+
+@app.post("/api/v1/overlaps/semantic-check")
+def semantic_check_api(request: SemanticCheckRequest):
+    """
+    Development-only semantic comparison.
+    Does not access or modify the database.
+    """
+    if os.getenv("SETU_ENABLE_SEMANTIC_CHECK", "").lower() != "true":
+        raise HTTPException(
+            status_code=404,
+            detail="Semantic check endpoint is disabled",
+        )
+
+    try:
+        result = semantic_similarity(
+            request.text_a,
+            request.text_b,
+        )
+
+        return {
+            **result,
+            "review_required": True,
+            "database_modified": False,
+        }
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Semantic comparison could not be completed",
+        )
+
 
 @app.get("/api/v1/overlaps/candidates")
 def get_overlap_candidates(
