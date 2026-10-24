@@ -214,6 +214,54 @@ def main():
     else:
         print("No semantic scores available; threshold comparison skipped.")
 
+    
+    print("\n=== Experimental hybrid comparison ===")
+
+    # Compare only pairs with both heuristic and semantic scores.
+    # This is offline evaluation; production rankings are unchanged.
+    if scored:
+        labels = [r["expected_overlap"] is True for r in scored]
+
+        for heuristic_weight in (0.8, 0.6, 0.4):
+            semantic_weight = 1.0 - heuristic_weight
+
+            hybrid_scores = [
+                heuristic_weight * (r["heuristic_score"] / 100.0)
+                + semantic_weight * r["semantic_similarity"]
+                for r in scored
+            ]
+
+            print(
+                f"\nWeights: heuristic={heuristic_weight:.0%}, "
+                f"semantic={semantic_weight:.0%}"
+            )
+
+            # Explore thresholds; do not treat them as production values.
+            for threshold in (0.65, 0.70, 0.75, 0.80, 0.85):
+                predictions = [
+                    score >= threshold for score in hybrid_scores
+                ]
+
+                tp = sum(p and y for p, y in zip(predictions, labels))
+                fp = sum(p and not y for p, y in zip(predictions, labels))
+                fn = sum(not p and y for p, y in zip(predictions, labels))
+                tn = sum(not p and not y for p, y in zip(predictions, labels))
+
+                precision = tp / (tp + fp) if tp + fp else 0.0
+                recall = tp / (tp + fn) if tp + fn else 0.0
+                f1 = (
+                    2 * precision * recall / (precision + recall)
+                    if precision + recall else 0.0
+                )
+
+                print(
+                    f"  threshold={threshold:.2f} | "
+                    f"TP={tp} FP={fp} FN={fn} TN={tn} | "
+                    f"P={precision:.3f} R={recall:.3f} F1={f1:.3f}"
+                )
+    else:
+        print("No semantic scores available; hybrid comparison skipped.")
+
     print("\n=== Interpretation ===")
     print(
         "Metrics describe only this small curated dataset. "
