@@ -10,6 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from db_context import set_request_db_context, reset_request_db_context
 
 
 DEMO_TOKEN_PATHS = {
@@ -105,7 +106,14 @@ async def authenticate_request(
             )
 
         request.state.auth_type = "demo_token"
-        return await call_next(request)
+        context_tokens = set_request_db_context(
+            auth_user_id=None,
+            demo_mode=True,
+        )
+        try:
+            return await call_next(request)
+        finally:
+            reset_request_db_context(context_tokens)
 
     # All remaining versioned API requests require a Supabase JWT.
     authorization = request.headers.get("Authorization", "")
@@ -142,4 +150,11 @@ async def authenticate_request(
     request.state.user_id = claims["sub"]
     request.state.jwt_claims = claims
 
-    return await call_next(request)
+    context_tokens = set_request_db_context(
+        auth_user_id=claims["sub"],
+        demo_mode=False,
+    )
+    try:
+        return await call_next(request)
+    finally:
+        reset_request_db_context(context_tokens)

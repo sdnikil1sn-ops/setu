@@ -4,6 +4,7 @@ from pathlib import Path
 
 import psycopg
 from dotenv import load_dotenv
+from db_context import apply_connection_context
 from auth import authenticate_request
 from psycopg import sql
 from psycopg.rows import dict_row
@@ -12,8 +13,9 @@ from institution_resolution import resolve_institution
 from fastapi import FastAPI, HTTPException, Query, Request
 from overlap_engine import find_overlap_candidates
 from embedding_provider import semantic_similarity
+import logging
 
-
+logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
@@ -53,11 +55,16 @@ def get_connection():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is missing from backend/.env")
 
-    return psycopg.connect(
+    conn = psycopg.connect(
         DATABASE_URL,
         connect_timeout=10,
         row_factory=dict_row,
     )
+    try:
+        return apply_connection_context(conn)
+    except Exception:
+        conn.close()
+        raise
 
 def require_case_profile(user_id: str) -> dict:
     """Require a real, approved SETU profile before case access."""
@@ -83,7 +90,7 @@ def require_case_profile(user_id: str) -> dict:
                         demo_only,
                         is_synthetic
                     FROM public.profiles
-                    WHERE user_id = %s
+                    WHERE auth_user_id = %s::uuid
                     """,
                     (user_id,),
                 )
@@ -499,6 +506,8 @@ def resolve_institution_api(
             ),
         }
 
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(
             status_code=503,
@@ -536,10 +545,11 @@ def get_overlap_candidates(
             detail=str(exc),
         )
     except Exception:
+        logger.exception("Failed to retrieve overlap candidates")
         raise HTTPException(
             status_code=503,
             detail="Could not retrieve overlap candidates",
-        )
+        ) from None
 
 
 class SemanticCheckRequest(BaseModel):
@@ -589,7 +599,8 @@ def semantic_check_api(
             detail=str(exc),
         )
     except Exception:
+        logger.exception("Semantic comparison failed")
         raise HTTPException(
             status_code=503,
             detail="Semantic comparison could not be completed",
-        )
+        ) from None

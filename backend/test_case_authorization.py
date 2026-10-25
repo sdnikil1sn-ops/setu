@@ -112,6 +112,17 @@ class TestCaseAuthorization(unittest.TestCase):
 
         self.assertEqual(result, approved_profile)
 
+    def test_profile_lookup_uses_supabase_auth_user_id(self):
+        approved_profile = self.profile()
+        self.cursor.fetchone.return_value = approved_profile
+
+        require_case_profile("auth-user-uuid")
+
+        query, params = self.cursor.execute.call_args.args
+        self.assertIn("WHERE auth_user_id = %s", query)
+        self.assertNotIn("WHERE user_id = %s", query)
+        self.assertEqual(params, ("auth-user-uuid",))
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

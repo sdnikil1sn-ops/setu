@@ -114,7 +114,38 @@ class TestSensitiveEndpointAuthorization(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         mock_resolve.assert_not_called()
+    @patch("main.resolve_institution")
+    def test_institution_resolution_preserves_http_exceptions(
+        self, mock_resolve
+    ):
+        mock_resolve.side_effect = HTTPException(
+            status_code=422,
+            detail="Invalid institution input",
+        )
 
+        with patch(
+            "auth.verify_supabase_jwt",
+            return_value={"sub": "approved-user"},
+        ), patch(
+            "main.require_case_profile",
+            return_value={
+                "user_id": "approved-user",
+                "role": "Desk Officer",
+            },
+        ):
+            response = client.post(
+                "/api/v1/institutions/resolve",
+                headers={
+                    "Authorization": "Bearer synthetic-test-token"
+                },
+                json={"raw_name": "Example College"},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(
+            response.json()["detail"],
+            "Invalid institution input",
+        )
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

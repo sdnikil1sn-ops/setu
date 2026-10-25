@@ -5,6 +5,7 @@ from pathlib import Path
 
 import psycopg
 from dotenv import load_dotenv
+from db_context import apply_connection_context
 from rapidfuzz import fuzz
 from psycopg.rows import dict_row
 
@@ -20,11 +21,16 @@ def get_connection():
     if not DATABASE_URL:
         raise RuntimeError("DATABASE_URL is missing from backend/.env")
 
-    return psycopg.connect(
+    conn = psycopg.connect(
         DATABASE_URL,
         connect_timeout=10,
         row_factory=dict_row,
     )
+    try:
+        return apply_connection_context(conn)
+    except Exception:
+        conn.close()
+        raise
 
 
 def normalize_text(value):
