@@ -4,7 +4,6 @@ import unittest
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
-
 from main import app
 
 
@@ -47,13 +46,18 @@ class TestSemanticCheckAPI(unittest.TestCase):
             "failed_providers": [],
         }
 
-        response = client.post(
-            "/api/v1/overlaps/semantic-check",
-            json={
-                "text_a": "Synthetic tuition refund complaint A",
-                "text_b": "Synthetic tuition refund complaint B",
-            },
-        )
+        with patch(
+            "auth.verify_supabase_jwt",
+            return_value={"sub": "synthetic-test-user"},
+        ):
+            response = client.post(
+                "/api/v1/overlaps/semantic-check",
+                headers={"Authorization": "Bearer synthetic-test-token"},
+                json={
+                    "text_a": "Synthetic tuition refund complaint A",
+                    "text_b": "Synthetic tuition refund complaint B",
+                },
+            )
 
         self.assertEqual(response.status_code, 200)
 
@@ -92,13 +96,18 @@ class TestSemanticCheckAPI(unittest.TestCase):
             "message": "Semantic matching is unavailable.",
         }
 
-        response = client.post(
-            "/api/v1/overlaps/semantic-check",
-            json={
-                "text_a": "Synthetic complaint A",
-                "text_b": "Synthetic complaint B",
-            },
-        )
+        with patch(
+            "auth.verify_supabase_jwt",
+            return_value={"sub": "synthetic-test-user"},
+        ):
+            response = client.post(
+                "/api/v1/overlaps/semantic-check",
+                headers={"Authorization": "Bearer synthetic-test-token"},
+                json={
+                    "text_a": "Synthetic complaint A",
+                    "text_b": "Synthetic complaint B",
+                },
+            )
 
         self.assertEqual(response.status_code, 200)
         data = response.json()
@@ -125,10 +134,15 @@ class TestSemanticCheckAPI(unittest.TestCase):
         }
         mock_candidates.return_value = expected
 
-        response = client.get(
-            "/api/v1/overlaps/candidates",
-            params={"limit": 1, "minimum_score": 50},
-        )
+        with patch(
+            "auth.verify_supabase_jwt",
+            return_value={"sub": "synthetic-test-user"},
+        ):
+            response = client.get(
+                "/api/v1/overlaps/candidates",
+                headers={"Authorization": "Bearer synthetic-test-token"},
+                params={"limit": 1, "minimum_score": 50},
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), expected)

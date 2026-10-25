@@ -5,6 +5,7 @@ from pathlib import Path
 import psycopg
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
+from auth import authenticate_request
 from psycopg import sql
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
@@ -24,6 +25,7 @@ app = FastAPI(
     description="Institution complaint intelligence backend",
     version="0.2.0",
 )
+app.middleware("http")(authenticate_request)
 
 # Fixed table names only; never accept table names from API users.
 COLLECTION_TABLES = {
