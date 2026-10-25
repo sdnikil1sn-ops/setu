@@ -4,7 +4,6 @@ from pathlib import Path
 
 import psycopg
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
 from auth import authenticate_request
 from psycopg import sql
 from psycopg.rows import dict_row
@@ -18,7 +17,7 @@ from embedding_provider import semantic_similarity
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("SETU_API_DATABASE_URL") or os.getenv("DATABASE_URL")
 
 app = FastAPI(
     title="SETU API",
@@ -135,6 +134,7 @@ def fetch_page(
     values: list,
     limit: int,
     offset: int,
+    columns: tuple[str, ...] | None = None,
 ):
     """Return a filtered page and the total number of matching rows."""
     where_clause = sql.SQL("")
@@ -154,9 +154,17 @@ def fetch_page(
             )
             total = cur.fetchone()["total"]
 
+            # Callers may restrict selected columns. Table and column names
+            # are passed as psycopg Identifiers, never interpolated as SQL.
+            selected_columns = (
+                sql.SQL(", ").join(sql.Identifier(column) for column in columns)
+                if columns
+                else sql.SQL("*")
+            )
             cur.execute(
-                sql.SQL("SELECT * FROM {}").format(
-                    sql.Identifier("public", table_name)
+                sql.SQL("SELECT {} FROM {}").format(
+                    selected_columns,
+                    sql.Identifier("public", table_name),
                 )
                 + where_clause
                 + sql.SQL(" ORDER BY 1 LIMIT %s OFFSET %s"),
@@ -211,7 +219,15 @@ def health():
 
 
 @app.get("/api/v1/summary")
-def get_summary():
+def get_summary(request: Request):
+    """Return internal dataset counts only to approved management roles."""
+    profile = require_case_profile(request.state.user_id)
+    if profile["role"] not in {"Admin", "Senior Management"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Your role is not authorized to view the database summary",
+        )
+
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
@@ -242,6 +258,7 @@ def get_summary():
         )
 
 
+
 @app.get("/api/v1/institutions")
 def get_institutions(
     search: str | None = None,
@@ -265,9 +282,41 @@ def get_institutions(
         conditions.append(sql.SQL("state ILIKE %s"))
         values.append(state)
 
-    return fetch_page(
-        "institutions", conditions, values, limit, offset
+    result = fetch_page(
+        "institutions",
+        conditions,
+        values,
+        limit,
+        offset,
+        columns=(
+            "institution_id",
+            "permanent_id",
+            "name",
+            "address",
+            "state",
+            "district",
+        ),
     )
+
+    public_fields = {
+        "institution_id",
+        "permanent_id",
+        "name",
+        "address",
+        "state",
+        "district",
+    }
+
+    result["items"] = [
+        {
+            key: item[key]
+            for key in public_fields
+            if key in item
+        }
+        for item in result["items"]
+    ]
+
+    return result
 
 
 
@@ -428,7 +477,23 @@ def resolve_institution_api(
             "resolution_confidence": result["resolution_confidence"],
             "reason": result["reason"],
             "institution": institution_summary,
-            "candidates": result.get("candidates", []),
+            # Return only documented candidate fields, even if the resolver
+            # adds internal columns in a future change.
+            "candidates": [
+                {
+                    key: candidate[key]
+                    for key in (
+                        "institution_id",
+                        "name",
+                        "permanent_id",
+                        "score",
+                        "matched_on",
+                    )
+                    if key in candidate
+                }
+                for candidate in (result.get("candidates") or [])[:5]
+                if isinstance(candidate, dict)
+            ],
             "review_required": (
                 result["resolution_status"] == "needs_review"
             ),
@@ -442,13 +507,24 @@ def resolve_institution_api(
 
 @app.get("/api/v1/overlaps/candidates")
 def get_overlap_candidates(
+    request: Request,
     limit: int = Query(default=20, ge=1, le=100),
     minimum_score: float = Query(default=50, ge=0, le=100),
 ):
-    """
-    Return ranked cross-bureau complaint candidates.
-    This endpoint is read-only; all candidates require human review.
-    """
+    """Return cross-bureau candidates only to explicitly authorized roles."""
+    profile = require_case_profile(request.state.user_id)
+
+    # Candidate pairs can reveal cross-bureau complaint details. Until the
+    # engine supports per-region/per-bureau filtering, use a conservative gate.
+    if profile["role"] not in {"Admin", "Senior Management"}:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Your role is not authorized to view cross-bureau "
+                "overlap candidates"
+            ),
+        )
+
     try:
         return find_overlap_candidates(
             limit=limit,
@@ -464,7 +540,7 @@ def get_overlap_candidates(
             status_code=503,
             detail="Could not retrieve overlap candidates",
         )
-        
+
 
 class SemanticCheckRequest(BaseModel):
     """Synthetic or explicitly authorized test texts only."""
@@ -474,7 +550,10 @@ class SemanticCheckRequest(BaseModel):
 
 
 @app.post("/api/v1/overlaps/semantic-check")
-def semantic_check_api(request: SemanticCheckRequest):
+def semantic_check_api(
+    request: SemanticCheckRequest,
+    http_request: Request,
+):
     """
     Development-only semantic comparison.
     Does not access or modify the database.
@@ -483,6 +562,13 @@ def semantic_check_api(request: SemanticCheckRequest):
         raise HTTPException(
             status_code=404,
             detail="Semantic check endpoint is disabled",
+        )
+
+    profile = require_case_profile(http_request.state.user_id)
+    if profile["role"] not in {"Admin", "Senior Management"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Your role is not authorized to use semantic checking",
         )
 
     try:
@@ -506,30 +592,4 @@ def semantic_check_api(request: SemanticCheckRequest):
         raise HTTPException(
             status_code=503,
             detail="Semantic comparison could not be completed",
-        )
-
-
-@app.get("/api/v1/overlaps/candidates")
-def get_overlap_candidates(
-    limit: int = Query(default=20, ge=1, le=100),
-    minimum_score: float = Query(default=50, ge=0, le=100),
-):
-    """
-    Return ranked cross-bureau complaint candidates.
-    This endpoint is read-only; all candidates require human review.
-    """
-    try:
-        return find_overlap_candidates(
-            limit=limit,
-            minimum_score=minimum_score,
-        )
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=str(exc),
-        )
-    except Exception:
-        raise HTTPException(
-            status_code=503,
-            detail="Could not retrieve overlap candidates",
         )

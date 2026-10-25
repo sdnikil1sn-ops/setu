@@ -13,7 +13,6 @@ from starlette.responses import JSONResponse, Response
 
 
 DEMO_TOKEN_PATHS = {
-    "/api/v1/summary",
     "/api/v1/institutions",
 }
 

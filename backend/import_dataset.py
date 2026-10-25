@@ -135,10 +135,10 @@ def insert_records(cur, table_name, records):
 def main():
     load_dotenv(BASE_DIR / ".env")
 
-    database_url = os.getenv("DATABASE_URL")
+    database_url = os.getenv("SETU_IMPORTER_DATABASE_URL") or os.getenv("DATABASE_URL")
     if not database_url:
         raise RuntimeError(
-            "DATABASE_URL is missing from backend/.env"
+            "SETU_IMPORTER_DATABASE_URL (or legacy DATABASE_URL) is missing from backend/.env"
         )
 
     data = load_dataset()

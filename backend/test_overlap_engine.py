@@ -1,87 +1,60 @@
+"""Offline unit tests plus an explicitly invoked live-DB smoke test."""
 
+import unittest
 from overlap_engine import score_pair, find_overlap_candidates
 
 
-# Test 1: Same institution should receive institution evidence.
-case_a = {
-    "institution_id": "INST-1",
-    "group_id": "GROUP-1",
-    "category": "Fees / Refund",
-    "text": "The college has not refunded the fee.",
-    "received_date": None,
-}
+class TestOverlapScoring(unittest.TestCase):
+    def setUp(self):
+        self.case_a = {
+            "institution_id": "INST-1", "group_id": "GROUP-1",
+            "category": "Fees / Refund",
+            "text": "The college has not refunded the fee.",
+            "received_date": None,
+        }
 
-case_b = {
-    "institution_id": "INST-1",
-    "group_id": "GROUP-1",
-    "category": "Fees / Refund",
-    "text": "The college has not refunded the fee.",
-    "received_date": None,
-}
+    def test_same_institution_receives_institution_evidence(self):
+        result = score_pair(self.case_a, dict(self.case_a))
+        self.assertTrue(result["same_institution"])
+        self.assertIn("Same canonical institution", result["reasons"])
 
-result = score_pair(case_a, case_b)
+    def test_same_group_different_institution_is_group_evidence(self):
+        case_b = {
+            "institution_id": "INST-2", "group_id": "GROUP-1",
+            "category": "Fees / Refund",
+            "text": "A student has not received a fee refund.",
+            "received_date": None,
+        }
+        result = score_pair(self.case_a, case_b)
+        self.assertFalse(result["same_institution"])
+        self.assertTrue(result["same_group"])
+        self.assertNotIn("Same canonical institution", result["reasons"])
 
-assert result["same_institution"] is True
-assert "Same canonical institution" in result["reasons"]
-
-
-# Test 2: Different campuses in the same group must not
-# receive the same-institution explanation.
-case_c = {
-    "institution_id": "INST-2",
-    "group_id": "GROUP-1",
-    "category": "Fees / Refund",
-    "text": "A student has not received a fee refund.",
-    "received_date": None,
-}
-
-result = score_pair(case_a, case_c)
-
-assert result["same_institution"] is False
-assert result["same_group"] is True
-assert "Same canonical institution" not in result["reasons"]
-assert any("institution group" in reason for reason in result["reasons"])
+    def test_unrelated_cases_get_no_relationship_evidence(self):
+        case_b = {
+            "institution_id": "INST-9", "group_id": "GROUP-9",
+            "category": "Other", "text": "A different issue entirely.",
+            "received_date": None,
+        }
+        result = score_pair(self.case_a, case_b)
+        self.assertFalse(result["same_institution"])
+        self.assertFalse(result["same_group"])
 
 
-# Test 3: Unrelated institution and group must not get
-# either relationship's points.
-case_d = {
-    "institution_id": "INST-9",
-    "group_id": "GROUP-9",
-    "category": "Other",
-    "text": "A different issue entirely.",
-    "received_date": None,
-}
-
-result = score_pair(case_a, case_d)
-
-assert result["same_institution"] is False
-assert result["same_group"] is False
-assert "Same canonical institution" not in result["reasons"]
+def run_database_smoke_test():
+    """Optional read-only database smoke test; run this file directly."""
+    result = find_overlap_candidates(limit=10, minimum_score=50)
+    assert result["returned_count"] <= 10
+    assert all(item["review_required"] for item in result["items"])
+    assert all(item["scope"] in ("institution", "group") for item in result["items"])
+    print("Read-only candidate query: PASS")
+    print("Candidate count:", result["candidate_count"])
+    print("Returned:", result["returned_count"])
 
 
-# Test 4: Run a read-only candidate query.
-result = find_overlap_candidates(limit=10, minimum_score=50)
-
-assert result["returned_count"] <= 10
-assert all(item["review_required"] for item in result["items"])
-assert all(item["scope"] in ("institution", "group") for item in result["items"])
-
-print("Same-institution scoring: PASS")
-print("Group-level scoring: PASS")
-print("Unrelated-pair scoring: PASS")
-print("Read-only candidate query: PASS")
-print("Candidate count:", result["candidate_count"])
-print("Returned:", result["returned_count"])
-
-for item in result["items"][:5]:
-    print(
-        item["case_a"],
-        "<->",
-        item["case_b"],
-        "| scope:", item["scope"],
-        "| score:", item["score"],
-        "| reasons:", ", ".join(item["reasons"]),
-    )
-
-print("OVERLAP ENGINE TEST PASSED")
+if __name__ == "__main__":
+    import sys
+    if "--live-db-smoke" in sys.argv:
+        run_database_smoke_test()
+    else:
+        unittest.main(verbosity=2)

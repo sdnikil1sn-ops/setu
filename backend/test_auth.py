@@ -23,12 +23,6 @@ class TestAuthentication(unittest.TestCase):
         {"SETU_API_TOKEN": "synthetic-demo-token"},
         clear=True,
     )
-    
-    @patch.dict(
-        os.environ,
-        {"SETU_API_TOKEN": "synthetic-demo-token"},
-        clear=True,
-    )
     @patch("main.fetch_page")
     def test_demo_token_allows_approved_read_only_route(
         self, mock_fetch_page
@@ -59,8 +53,6 @@ class TestAuthentication(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 403)
 
-    @patch.dict(os.environ, {}, clear=True)
-    
     @patch.dict(os.environ, {}, clear=True)
     @patch("auth.verify_supabase_jwt")
     @patch("main.require_case_profile")
@@ -115,6 +107,66 @@ class TestAuthentication(unittest.TestCase):
             headers={"X-SETU-API-TOKEN": "synthetic-demo-token"},
         )
         self.assertEqual(response.status_code, 403)
+    
+    @patch.dict(
+        os.environ,
+        {"SETU_API_TOKEN": "synthetic-demo-token"},
+        clear=True,
+    )
+    def test_demo_token_cannot_access_full_summary(self):
+        response = client.get(
+            "/api/v1/summary",
+            headers={"X-SETU-API-TOKEN": "synthetic-demo-token"},
+        )
+        self.assertEqual(response.status_code, 403)
+    
+    @patch.dict(
+        os.environ,
+        {"SETU_API_TOKEN": "synthetic-demo-token"},
+        clear=True,
+    )
+    @patch("main.fetch_page")
+    def test_demo_institutions_excludes_internal_fields(
+        self, mock_fetch_page
+    ):
+        mock_fetch_page.return_value = {
+            "total": 1,
+            "limit": 20,
+            "offset": 0,
+            "items": [
+                {
+                    "institution_id": "inst-001",
+                    "permanent_id": "PERM-001",
+                    "name": "Example College",
+                    "address": "Example Road",
+                    "state": "Tamil Nadu",
+                    "district": "Chennai",
+                    "normalized_name": "example college",
+                    "region_id": "region-001",
+                    "group_id": "group-001",
+                    "campus_number": 1,
+                    "is_synthetic": True,
+                }
+            ],
+        }
+
+        response = client.get(
+            "/api/v1/institutions",
+            headers={"X-SETU-API-TOKEN": "synthetic-demo-token"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        item = response.json()["items"][0]
+
+        expected_fields = {
+            "institution_id",
+            "permanent_id",
+            "name",
+            "address",
+            "state",
+            "district",
+        }
+        self.assertEqual(set(item.keys()), expected_fields)
 
 
 

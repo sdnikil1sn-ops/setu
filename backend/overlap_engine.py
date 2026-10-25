@@ -12,7 +12,7 @@ from psycopg.rows import dict_row
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+DATABASE_URL = os.getenv("SETU_API_DATABASE_URL") or os.getenv("DATABASE_URL")
 
 
 def get_connection():

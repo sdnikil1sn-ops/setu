@@ -4,8 +4,6 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 
 
 def cosine_similarity(a, b):
@@ -46,6 +44,9 @@ def get_embedding(client, model, text):
 
 
 def main():
+    from google import genai
+    from google.genai import types
+
     load_dotenv()
 
     api_key = os.getenv("GEMINI_API_KEY")

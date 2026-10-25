@@ -1,43 +1,30 @@
+"""Offline fuzzy-name unit test and optional live DB smoke test."""
 
-from institution_resolution import (
-    find_fuzzy_candidates,
-    normalize_name,
-)
-
-# First, test the similarity function independently of the database.
-original = "ABC Engineering College"
-misspelled = "ABC Enginering College"
-
-score = find_similarity = None
-
+import unittest
 from rapidfuzz import fuzz
+from institution_resolution import find_fuzzy_candidates, normalize_name
 
-score = fuzz.ratio(
-    normalize_name(original),
-    normalize_name(misspelled),
-)
 
-print("Original:", original)
-print("Misspelled:", misspelled)
-print("Similarity score:", round(score, 2))
+class TestFuzzyNameSimilarity(unittest.TestCase):
+    def test_small_typo_has_high_similarity(self):
+        score = fuzz.ratio(
+            normalize_name("ABC Engineering College"),
+            normalize_name("ABC Enginering College"),
+        )
+        self.assertGreaterEqual(score, 90)
 
-assert score >= 90, "Expected a high similarity score."
 
-# Then test candidate retrieval using the existing database.
-result = find_fuzzy_candidates(misspelled)
+def run_database_smoke_test():
+    result = find_fuzzy_candidates("ABC Enginering College")
+    assert result["resolution_method"] == "fuzzy_name"
+    assert result["resolution_status"] in ("needs_review", "unresolved")
+    print("Fuzzy matching database smoke test: PASS")
+    print("Resolution status:", result["resolution_status"])
 
-print("Resolution status:", result["resolution_status"])
-print("Reason:", result["reason"])
-print("Candidates:")
 
-for candidate in result["candidates"]:
-    print(
-        candidate["name"],
-        "| score:", candidate["score"],
-        "| matched on:", candidate["matched_on"],
-    )
-
-assert result["resolution_method"] == "fuzzy_name"
-assert result["resolution_status"] in ("needs_review", "unresolved")
-
-print("FUZZY MATCHING TEST PASSED")
+if __name__ == "__main__":
+    import sys
+    if "--live-db-smoke" in sys.argv:
+        run_database_smoke_test()
+    else:
+        unittest.main(verbosity=2)
