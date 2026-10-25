@@ -10,7 +10,7 @@ from psycopg import sql
 from psycopg.rows import dict_row
 from pydantic import BaseModel, Field
 from institution_resolution import resolve_institution
-
+from fastapi import FastAPI, HTTPException, Query, Request
 from overlap_engine import find_overlap_candidates
 from embedding_provider import semantic_similarity
 
@@ -59,6 +59,74 @@ def get_connection():
         connect_timeout=10,
         row_factory=dict_row,
     )
+
+def require_case_profile(user_id: str) -> dict:
+    """Require a real, approved SETU profile before case access."""
+
+    allowed_roles = {
+        "Admin",
+        "Bureau Head",
+        "Desk Officer",
+        "Regional Officer",
+        "Senior Management",
+    }
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        user_id,
+                        role,
+                        bureau_id,
+                        region_id,
+                        demo_only,
+                        is_synthetic
+                    FROM public.profiles
+                    WHERE user_id = %s
+                    """,
+                    (user_id,),
+                )
+                profile = cur.fetchone()
+
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not verify user authorization",
+        )
+
+    if profile is None:
+        raise HTTPException(
+            status_code=403,
+            detail="No approved SETU profile is linked to this account",
+        )
+
+    if profile["demo_only"] or profile["is_synthetic"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Demo or synthetic profiles cannot access case records",
+        )
+
+    if profile["role"] not in allowed_roles:
+        raise HTTPException(
+            status_code=403,
+            detail="The user's role is not authorized",
+        )
+
+    if profile["role"] == "Bureau Head" and not profile["bureau_id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="The user has no assigned bureau",
+        )
+
+    if profile["role"] == "Regional Officer" and not profile["region_id"]:
+        raise HTTPException(
+            status_code=403,
+            detail="The user has no assigned region",
+        )
+
+    return profile
 
 
 def fetch_page(
@@ -202,41 +270,102 @@ def get_institutions(
     )
 
 
+
 @app.get("/api/v1/cases")
 def get_cases(
+    request: Request,
     status: str | None = None,
     bureau_id: str | None = None,
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
 ):
-    conditions = []
+    profile = require_case_profile(request.state.user_id)
+
+    conditions = [sql.SQL("is_restricted IS FALSE")]
     values = []
+
+    role = profile["role"]
+
+    if role == "Regional Officer":
+        conditions.append(sql.SQL("region_id = %s"))
+        values.append(profile["region_id"])
+
+    elif role == "Bureau Head":
+        conditions.append(sql.SQL("current_bureau_id = %s"))
+        values.append(profile["bureau_id"])
+
+    elif role == "Desk Officer":
+        conditions.append(sql.SQL("assigned_user_id = %s"))
+        values.append(profile["user_id"])
+
+    elif role not in {"Admin", "Senior Management"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Role is not authorized to view cases",
+        )
+
+    # An optional bureau filter may narrow access, never expand it.
+    if bureau_id:
+        conditions.append(sql.SQL("current_bureau_id = %s"))
+        values.append(bureau_id)
 
     if status:
         conditions.append(sql.SQL("status ILIKE %s"))
         values.append(status)
 
-    if bureau_id:
-        conditions.append(sql.SQL("current_bureau_id = %s"))
-        values.append(bureau_id)
-
     return fetch_page(
-        "complaint_cases", conditions, values, limit, offset
+        "complaint_cases",
+        conditions,
+        values,
+        limit,
+        offset,
     )
 
 
+
 @app.get("/api/v1/cases/{case_id}")
-def get_case(case_id: str):
+def get_case(case_id: str, request: Request):
+    profile = require_case_profile(request.state.user_id)
+
+    conditions = [
+        sql.SQL("case_id = %s"),
+        sql.SQL("is_restricted IS FALSE"),
+    ]
+    values = [case_id]
+
+    role = profile["role"]
+
+    if role == "Regional Officer":
+        conditions.append(sql.SQL("region_id = %s"))
+        values.append(profile["region_id"])
+
+    elif role == "Bureau Head":
+        conditions.append(sql.SQL("current_bureau_id = %s"))
+        values.append(profile["bureau_id"])
+
+    elif role == "Desk Officer":
+        conditions.append(sql.SQL("assigned_user_id = %s"))
+        values.append(profile["user_id"])
+
+    elif role not in {"Admin", "Senior Management"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Role is not authorized to view cases",
+        )
+
+    where_clause = (
+        sql.SQL(" WHERE ")
+        + sql.SQL(" AND ").join(conditions)
+    )
+
     try:
         with get_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
-                    """
-                    SELECT *
-                    FROM public.complaint_cases
-                    WHERE case_id = %s
-                    """,
-                    (case_id,),
+                    sql.SQL(
+                        "SELECT * FROM public.complaint_cases"
+                    ) + where_clause,
+                    values,
                 )
                 case = cur.fetchone()
 
@@ -265,10 +394,14 @@ class InstitutionResolutionRequest(BaseModel):
 
 
 @app.post("/api/v1/institutions/resolve")
-def resolve_institution_api(request: InstitutionResolutionRequest):
-    """
-    Propose an institution match without modifying database records.
-    """
+def resolve_institution_api(
+    request: InstitutionResolutionRequest,
+    http_request: Request,
+):
+    """Propose an institution match without modifying database records."""
+
+    require_case_profile(http_request.state.user_id)
+
     try:
         result = resolve_institution(
             raw_permanent_id=request.raw_permanent_id,

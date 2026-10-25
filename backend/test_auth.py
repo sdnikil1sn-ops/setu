@@ -60,15 +60,28 @@ class TestAuthentication(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
 
     @patch.dict(os.environ, {}, clear=True)
+    
+    @patch.dict(os.environ, {}, clear=True)
     @patch("auth.verify_supabase_jwt")
+    @patch("main.require_case_profile")
     @patch("main.fetch_page")
     def test_validated_user_can_access_cases(
-        self, mock_fetch_page, mock_verify
+        self, mock_fetch_page, mock_require_profile, mock_verify
     ):
         mock_verify.return_value = {
-            "sub": "synthetic-test-user",
+            "sub": "approved-test-user",
             "aud": "authenticated",
         }
+
+        mock_require_profile.return_value = {
+            "user_id": "approved-test-user",
+            "role": "Admin",
+            "bureau_id": None,
+            "region_id": None,
+            "demo_only": False,
+            "is_synthetic": False,
+        }
+
         mock_fetch_page.return_value = {
             "total": 0,
             "limit": 20,
@@ -85,7 +98,11 @@ class TestAuthentication(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         mock_verify.assert_called_once_with("synthetic-test-token")
-    
+        mock_require_profile.assert_called_once_with(
+            "approved-test-user"
+        )
+        mock_fetch_page.assert_called_once()
+
     
     @patch.dict(
         os.environ,
