@@ -1,0 +1,11 @@
+﻿pair_id,expected_same_incident,incident_relationship,candidate_flag,evaluation_outcome,evidence_level,evidence_signals,incident_explanation
+EXP-P01,True,unresolved_human_review,False,missed_positive_candidate,topic_overlap_only,shared_topic_terms;paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
+EXP-P02,True,unresolved_human_review,False,missed_positive_candidate,shared_intent_only,paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
+EXP-P03,True,unresolved_human_review,False,missed_positive_candidate,topic_overlap_only,shared_topic_terms;paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
+EXP-P04,True,unresolved_human_review,False,missed_positive_candidate,topic_overlap_only,shared_topic_terms;paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
+EXP-P05,True,unresolved_human_review,False,missed_positive_candidate,topic_overlap_only,shared_topic_terms;paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
+EXP-P06,True,unresolved_human_review,False,missed_positive_candidate,shared_intent_only,paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
+EXP-P07,True,unresolved_human_review,False,missed_positive_candidate,topic_overlap_only,shared_topic_terms;paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
+EXP-P08,True,unresolved_human_review,False,missed_positive_candidate,topic_overlap_only,shared_topic_terms;paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
+EXP-P09,True,unresolved_human_review,False,missed_positive_candidate,topic_overlap_only,shared_topic_terms;paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
+EXP-P10,True,unresolved_human_review,False,missed_positive_candidate,shared_intent_only,paraphrase_support,Available structured evidence does not establish whether these texts describe the same incident.
