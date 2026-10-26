@@ -204,6 +204,136 @@ class TestSemanticCheckAPI(unittest.TestCase):
 
         self.assertEqual(response.status_code, 403)
         mock_candidates.assert_not_called()
+    
+    @patch("main.find_overlap_candidates")
+    @patch("main.logger")
+    def test_overlap_value_error_does_not_leak_exception(
+        self, mock_logger, mock_candidates
+    ):
+        mock_candidates.side_effect = ValueError(
+            "FAKE_SECRET_MARKER_INTERNAL_DETAIL"
+        )
+
+        with patch(
+            "auth.verify_supabase_jwt",
+            return_value={"sub": "synthetic-admin"},
+        ), patch(
+            "main.require_case_profile",
+            return_value={"user_id": "synthetic-admin", "role": "Admin"},
+        ):
+            response = client.get(
+                "/api/v1/overlaps/candidates",
+                headers={"Authorization": "Bearer synthetic-test-token"},
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn(
+            "FAKE_SECRET_MARKER_INTERNAL_DETAIL",
+            response.text,
+        )
+        mock_logger.warning.assert_called_once()
+
+    @patch("main.find_overlap_candidates")
+    @patch("main.logger")
+    def test_overlap_internal_error_is_safe_and_logged(
+        self, mock_logger, mock_candidates
+    ):
+        mock_candidates.side_effect = RuntimeError(
+            "FAKE_SECRET_MARKER_INTERNAL_DETAIL"
+        )
+
+        with patch(
+            "auth.verify_supabase_jwt",
+            return_value={"sub": "synthetic-admin"},
+        ), patch(
+            "main.require_case_profile",
+            return_value={"user_id": "synthetic-admin", "role": "Admin"},
+        ):
+            response = client.get(
+                "/api/v1/overlaps/candidates",
+                headers={"Authorization": "Bearer synthetic-test-token"},
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn(
+            "FAKE_SECRET_MARKER_INTERNAL_DETAIL",
+            response.text,
+        )
+        mock_logger.exception.assert_called_once()
+
+    @patch.dict(
+        os.environ,
+        {"SETU_ENABLE_SEMANTIC_CHECK": "true"},
+        clear=True,
+    )
+    @patch("main.semantic_similarity")
+    @patch("main.logger")
+    def test_semantic_value_error_does_not_leak_exception(
+        self, mock_logger, mock_similarity
+    ):
+        mock_similarity.side_effect = ValueError(
+            "FAKE_SECRET_MARKER_INTERNAL_DETAIL"
+        )
+
+        with patch(
+            "auth.verify_supabase_jwt",
+            return_value={"sub": "synthetic-admin"},
+        ), patch(
+            "main.require_case_profile",
+            return_value={"user_id": "synthetic-admin", "role": "Admin"},
+        ):
+            response = client.post(
+                "/api/v1/overlaps/semantic-check",
+                headers={"Authorization": "Bearer synthetic-test-token"},
+                json={
+                    "text_a": "Synthetic complaint A",
+                    "text_b": "Synthetic complaint B",
+                },
+            )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertNotIn(
+            "FAKE_SECRET_MARKER_INTERNAL_DETAIL",
+            response.text,
+        )
+        mock_logger.warning.assert_called_once()
+
+    @patch.dict(
+        os.environ,
+        {"SETU_ENABLE_SEMANTIC_CHECK": "true"},
+        clear=True,
+    )
+    @patch("main.semantic_similarity")
+    @patch("main.logger")
+    def test_semantic_internal_error_is_safe_and_logged(
+        self, mock_logger, mock_similarity
+    ):
+        mock_similarity.side_effect = RuntimeError(
+            "FAKE_SECRET_MARKER_INTERNAL_DETAIL"
+        )
+
+        with patch(
+            "auth.verify_supabase_jwt",
+            return_value={"sub": "synthetic-admin"},
+        ), patch(
+            "main.require_case_profile",
+            return_value={"user_id": "synthetic-admin", "role": "Admin"},
+        ):
+            response = client.post(
+                "/api/v1/overlaps/semantic-check",
+                headers={"Authorization": "Bearer synthetic-test-token"},
+                json={
+                    "text_a": "Synthetic complaint A",
+                    "text_b": "Synthetic complaint B",
+                },
+            )
+
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn(
+            "FAKE_SECRET_MARKER_INTERNAL_DETAIL",
+            response.text,
+        )
+        mock_logger.exception.assert_called_once()
 
 
 if __name__ == "__main__":

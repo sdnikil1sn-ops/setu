@@ -135,11 +135,19 @@ def insert_records(cur, table_name, records):
 def main():
     load_dotenv(BASE_DIR / ".env")
 
-    database_url = os.getenv("SETU_IMPORTER_DATABASE_URL") or os.getenv("DATABASE_URL")
+    database_url = os.getenv("SETU_IMPORTER_DATABASE_URL")
+
     if not database_url:
         raise RuntimeError(
-            "SETU_IMPORTER_DATABASE_URL (or legacy DATABASE_URL) is missing from backend/.env"
-        )
+            "SETU_IMPORTER_DATABASE_URL is required. "
+            "Refusing to fall back to the general application database."
+    )
+
+    if database_url == os.getenv("DATABASE_URL"):
+        raise RuntimeError(
+            "Importer database must be separate from DATABASE_URL. "
+            "Import cancelled."
+    )
 
     data = load_dataset()
 

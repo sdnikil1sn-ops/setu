@@ -1,0 +1,17 @@
+﻿SETU remaining-work audit report
+Started: 10/26/2026 01:55:31
+Finished: 10/26/2026 01:55:37
+Backend: E:\App\Project\setu\backend
+
+No token, password, or database URL values are written to this report.
+
+[PASS] Automated tests: pytest -q passed.
+[BLOCKED] Real-row RLS isolation: Requires an isolated test DB and controlled case IDs. Missing: SETU_RLS_TEST_DATABASE_URL, SETU_RLS_ALLOWED_CASE_ID, SETU_RLS_RESTRICTED_CASE_ID, SETU_RLS_OUT_OF_SCOPE_CASE_ID
+[BLOCKED] Five-role authorization E2E: Missing token variables: SETU_AUDIT_TOKEN_ADMIN, SETU_AUDIT_TOKEN_SENIOR_MANAGEMENT, SETU_AUDIT_TOKEN_BUREAU_HEAD, SETU_AUDIT_TOKEN_REGIONAL_OFFICER, SETU_AUDIT_TOKEN_DESK_OFFICER; no dedicated role E2E runner found
+[BLOCKED] Live overlap retrieval: no dedicated live-overlap test script found; SETU_OVERLAP_TEST_DATABASE_URL is not configured
+[BLOCKED] Backup/restore proof: SETU_BACKUP_DIR must point to an existing directory; pg_dump missing from PATH; pg_restore missing from PATH; SETU_RESTORE_TEST_DATABASE_URL must clearly identify a separate test database
+[REVIEW] Logging/exception audit: Potential exception-detail patterns at main.py:545, main.py:599; SETU_LOG_LEVEL not found in process environment or .env
+[BLOCKED] Dataset importer: Separate SETU_IMPORTER_DATABASE_URL or import_dataset.py is missing. Importer remains unexecuted.
+[PASS] Existing consolidated readiness runner: Script exited successfully.
+
+Important: PASS on unit tests does not prove real-row RLS isolation, five-role E2E, live overlap retrieval, or successful backup restoration.

@@ -95,8 +95,8 @@ def require_case_profile(user_id: str) -> dict:
                     (user_id,),
                 )
                 profile = cur.fetchone()
-
     except Exception:
+        logger.exception("Failed to verify user authorization profile")
         raise HTTPException(
             status_code=503,
             detail="Could not verify user authorization",
@@ -218,7 +218,7 @@ def health():
         }
 
     except Exception:
-        # Do not return connection strings or database credentials.
+        logger.exception("Database health check failed")
         raise HTTPException(
             status_code=503,
             detail="Database connection failed",
@@ -259,6 +259,7 @@ def get_summary(request: Request):
         return {"actual_counts": counts}
 
     except Exception:
+        logger.exception("Failed to retrieve database summary")
         raise HTTPException(
             status_code=503,
             detail="Could not retrieve database summary",
@@ -436,6 +437,7 @@ def get_case(case_id: str, request: Request):
     except HTTPException:
         raise
     except Exception:
+        logger.exception("Failed to retrieve case")
         raise HTTPException(
             status_code=503,
             detail="Could not retrieve case",
@@ -509,6 +511,7 @@ def resolve_institution_api(
     except HTTPException:
         raise
     except Exception:
+        logger.exception("Institution resolution failed")
         raise HTTPException(
             status_code=503,
             detail="Institution resolution could not be completed",
@@ -539,11 +542,12 @@ def get_overlap_candidates(
             limit=limit,
             minimum_score=minimum_score,
         )
-    except ValueError as exc:
+    except ValueError:
+        logger.warning("Invalid value while retrieving overlap candidates")
         raise HTTPException(
             status_code=422,
-            detail=str(exc),
-        )
+            detail="The overlap request could not be processed",
+        ) from None
     except Exception:
         logger.exception("Failed to retrieve overlap candidates")
         raise HTTPException(
@@ -593,11 +597,12 @@ def semantic_check_api(
             "database_modified": False,
         }
 
-    except ValueError as exc:
+    except ValueError:
+        logger.warning("Invalid value during semantic comparison")
         raise HTTPException(
             status_code=422,
-            detail=str(exc),
-        )
+            detail="The supplied texts could not be compared",
+        ) from None
     except Exception:
         logger.exception("Semantic comparison failed")
         raise HTTPException(

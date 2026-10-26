@@ -1,0 +1,22 @@
+SETU ONE-RUN READINESS REPORT
+Backend: E:\App\Project\setu\backend
+Generated: 2026-10-25T20:25:37.464360+00:00
+
+PASS	Full automated tests	pytest -q exit 0
+PASS	Security test inventory	6/6 expected test files found
+BLOCKED	Real-row RLS isolation	No dedicated controlled RLS fixture configuration; missing SETU_RLS_TEST_DATABASE_URL, SETU_RLS_ALLOWED_CASE_ID, SETU_RLS_RESTRICTED_CASE_ID, SETU_RLS_OUT_OF_SCOPE_CASE_ID
+BLOCKED	Role-by-role E2E credentials	0/5 token variables configured; missing: SETU_AUDIT_TOKEN_ADMIN, SETU_AUDIT_TOKEN_SENIOR_MANAGEMENT, SETU_AUDIT_TOKEN_BUREAU_HEAD, SETU_AUDIT_TOKEN_REGIONAL_OFFICER, SETU_AUDIT_TOKEN_DESK_OFFICER
+PASS	Overlap scoring/tests	overlap test exit 0
+BLOCKED	Live overlap candidate retrieval	No explicitly named isolated overlap test DB configured; zero live candidates cannot prove retrieval
+BLOCKED	Backup directory	SETU_BACKUP_DIR is absent or does not point to an existing directory
+BLOCKED	PostgreSQL backup tools	pg_dump/pg_restore not both found on PATH
+BLOCKED	Backup restore proof	No clearly designated SETU_RESTORE_TEST_DATABASE_URL ending in _restore_test, _test, or _testing; no restore attempted
+REVIEW	Exception-detail heuristic scan	Potential raw exception details at main.py:545, main.py:599
+REVIEW	Log-level configuration	SETU_LOG_LEVEL is unset; inspect actual logging configuration and deployment defaults
+BLOCKED	Importer credential presence	SETU_IMPORTER_DATABASE_URL is not configured; importer remains unverified and should stay disabled
+PASS	Health endpoint	HTTP 200; expected [200]
+PASS	Unauthenticated sensitive endpoint denial	HTTP 401; expected [401, 403]
+BLOCKED	Demo-token route checks	SETU_API_TOKEN is not configured in this process environment; no token value printed
+
+Interpretation: this is a triage report, not a production certification.
+RLS fixture assertions and restore validation are deliberately not auto-run without an isolated target and explicit project-specific test logic.
