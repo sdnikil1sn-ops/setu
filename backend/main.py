@@ -562,7 +562,349 @@ class SemanticCheckRequest(BaseModel):
     text_a: str = Field(min_length=1, max_length=3000)
     text_b: str = Field(min_length=1, max_length=3000)
 
+@app.get("/api/v1/dependency-map")
+def get_dependency_map(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=200),
+):
+    """
+    Return a graph of visible, non-synthetic case-link records.
 
+    Case links are not automatically treated as confirmed dependencies.
+    Only Admin and Senior Management may view this cross-bureau graph.
+    """
+    profile = require_case_profile(request.state.user_id)
+
+    if profile["role"] not in {"Admin", "Senior Management"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Your role is not authorized to view the cross-bureau dependency map",
+        )
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        l.link_id,
+                        l.state AS link_state,
+                        l.score AS link_score,
+                        l.tier AS link_tier,
+                        l.scope AS link_scope,
+                        l.reasons AS link_reasons,
+                        l.note AS link_note,
+                        l.decided_at,
+
+                        a.case_id AS a_case_id,
+                        a.case_ref AS a_case_ref,
+                        a.category AS a_category,
+                        a.status AS a_status,
+                        a.current_bureau_id AS a_bureau_id,
+                        ba.name AS a_bureau_name,
+                        a.institution_name_raw AS a_institution_name,
+                        a.expected_disposal_date AS a_deadline,
+                        a.sla_state AS a_sla_state,
+
+                        b.case_id AS b_case_id,
+                        b.case_ref AS b_case_ref,
+                        b.category AS b_category,
+                        b.status AS b_status,
+                        b.current_bureau_id AS b_bureau_id,
+                        bb.name AS b_bureau_name,
+                        b.institution_name_raw AS b_institution_name,
+                        b.expected_disposal_date AS b_deadline,
+                        b.sla_state AS b_sla_state
+
+                    FROM public.case_links AS l
+                    JOIN public.complaint_cases AS a
+                      ON a.case_id = l.case_a
+                    JOIN public.complaint_cases AS b
+                      ON b.case_id = l.case_b
+                    LEFT JOIN public.bureaus AS ba
+                      ON ba.bureau_id = a.current_bureau_id
+                    LEFT JOIN public.bureaus AS bb
+                      ON bb.bureau_id = b.current_bureau_id
+
+                    WHERE l.is_synthetic IS FALSE
+                      AND a.is_synthetic IS FALSE
+                      AND b.is_synthetic IS FALSE
+                      AND a.is_restricted IS FALSE
+                      AND b.is_restricted IS FALSE
+                      AND COALESCE(l.state, '') NOT IN (
+                          'dismissed',
+                          'rejected'
+                      )
+
+                    ORDER BY
+                        l.decided_at DESC NULLS LAST,
+                        l.score DESC NULLS LAST,
+                        l.link_id
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+
+                rows = cur.fetchall()
+
+        nodes_by_id = {}
+        edges = []
+
+        def add_node(
+            case_id,
+            case_ref,
+            category,
+            status,
+            bureau_id,
+            bureau_name,
+            institution_name,
+            deadline,
+            sla_state,
+        ):
+            if case_id not in nodes_by_id:
+                nodes_by_id[case_id] = {
+                    "id": case_id,
+                    "label": case_ref or case_id,
+                    "category": category,
+                    "status": status,
+                    "bureau_id": bureau_id,
+                    "bureau_name": bureau_name or bureau_id or "Unassigned",
+                    "institution_name": institution_name,
+                    "deadline": deadline,
+                    "sla_state": sla_state,
+                }
+
+        for row in rows:
+            add_node(
+                row["a_case_id"],
+                row["a_case_ref"],
+                row["a_category"],
+                row["a_status"],
+                row["a_bureau_id"],
+                row["a_bureau_name"],
+                row["a_institution_name"],
+                row["a_deadline"],
+                row["a_sla_state"],
+            )
+
+            add_node(
+                row["b_case_id"],
+                row["b_case_ref"],
+                row["b_category"],
+                row["b_status"],
+                row["b_bureau_id"],
+                row["b_bureau_name"],
+                row["b_institution_name"],
+                row["b_deadline"],
+                row["b_sla_state"],
+            )
+
+            edges.append(
+                {
+                    "id": row["link_id"],
+                    "source": row["a_case_id"],
+                    "target": row["b_case_id"],
+                    "relationship_type": "case_link",
+                    "status": row["link_state"] or "unspecified",
+                    "score": (
+                        float(row["link_score"])
+                        if row["link_score"] is not None
+                        else None
+                    ),
+                    "tier": row["link_tier"],
+                    "scope": row["link_scope"],
+                    "reasons": row["link_reasons"] or [],
+                    "note": row["link_note"],
+                    "decided_at": row["decided_at"],
+                    "requires_human_review": (
+                        row["link_state"] not in {"confirmed", "accepted"}
+                    ),
+                }
+            )
+
+        return {
+            "nodes": list(nodes_by_id.values()),
+            "edges": edges,
+            "node_count": len(nodes_by_id),
+            "edge_count": len(edges),
+            "limit": limit,
+            "layout": "frontend-computed",
+            "notice": (
+                "Edges represent existing case-link records, not necessarily "
+                "confirmed operational dependencies. Scores are not probabilities. "
+                "Review link status and evidence before taking action."
+            ),
+        }
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to retrieve dependency map")
+        raise HTTPException(
+            status_code=503,
+            detail="The dependency map could not be retrieved",
+        )
+        
+
+@app.get("/api/v1/dependency-map/benchmark")
+def get_dependency_map_benchmark(
+    request: Request,
+    limit: int = Query(default=100, ge=1, le=200),
+):
+    """Return synthetic benchmark links for authorized preview only."""
+    profile = require_case_profile(request.state.user_id)
+
+    if profile["role"] not in {"Admin", "Senior Management"}:
+        raise HTTPException(
+            status_code=403,
+            detail="Your role is not authorized to view the benchmark graph",
+        )
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT
+                        l.link_id,
+                        l.state AS link_state,
+                        l.score AS link_score,
+                        l.tier AS link_tier,
+                        l.scope AS link_scope,
+                        l.reasons AS link_reasons,
+                        l.note AS link_note,
+                        l.decided_at,
+
+                        a.case_id AS a_case_id,
+                        a.case_ref AS a_case_ref,
+                        a.category AS a_category,
+                        a.status AS a_status,
+                        a.current_bureau_id AS a_bureau_id,
+                        ba.name AS a_bureau_name,
+                        a.institution_name_raw AS a_institution_name,
+                        a.expected_disposal_date AS a_deadline,
+                        a.sla_state AS a_sla_state,
+
+                        b.case_id AS b_case_id,
+                        b.case_ref AS b_case_ref,
+                        b.category AS b_category,
+                        b.status AS b_status,
+                        b.current_bureau_id AS b_bureau_id,
+                        bb.name AS b_bureau_name,
+                        b.institution_name_raw AS b_institution_name,
+                        b.expected_disposal_date AS b_deadline,
+                        b.sla_state AS b_sla_state
+
+                    FROM public.case_links AS l
+                    JOIN public.complaint_cases AS a
+                      ON a.case_id = l.case_a
+                    JOIN public.complaint_cases AS b
+                      ON b.case_id = l.case_b
+                    LEFT JOIN public.bureaus AS ba
+                      ON ba.bureau_id = a.current_bureau_id
+                    LEFT JOIN public.bureaus AS bb
+                      ON bb.bureau_id = b.current_bureau_id
+
+                    WHERE l.is_synthetic IS TRUE
+                      AND a.is_synthetic IS TRUE
+                      AND b.is_synthetic IS TRUE
+                      AND a.is_restricted IS FALSE
+                      AND b.is_restricted IS FALSE
+
+                    ORDER BY
+                        l.decided_at DESC NULLS LAST,
+                        l.score DESC NULLS LAST,
+                        l.link_id
+                    LIMIT %s
+                    """,
+                    (limit,),
+                )
+                rows = cur.fetchall()
+
+        nodes_by_id = {}
+        edges = []
+
+        def add_node(
+            case_id, case_ref, category, status,
+            bureau_id, bureau_name, institution_name,
+            deadline, sla_state,
+        ):
+            if case_id not in nodes_by_id:
+                nodes_by_id[case_id] = {
+                    "id": case_id,
+                    "label": case_ref or case_id,
+                    "category": category,
+                    "status": status,
+                    "bureau_id": bureau_id,
+                    "bureau_name": bureau_name or bureau_id or "Unassigned",
+                    "institution_name": institution_name,
+                    "deadline": deadline,
+                    "sla_state": sla_state,
+                    "is_synthetic": True,
+                }
+
+        for row in rows:
+            add_node(
+                row["a_case_id"], row["a_case_ref"],
+                row["a_category"], row["a_status"],
+                row["a_bureau_id"], row["a_bureau_name"],
+                row["a_institution_name"], row["a_deadline"],
+                row["a_sla_state"],
+            )
+            add_node(
+                row["b_case_id"], row["b_case_ref"],
+                row["b_category"], row["b_status"],
+                row["b_bureau_id"], row["b_bureau_name"],
+                row["b_institution_name"], row["b_deadline"],
+                row["b_sla_state"],
+            )
+
+            edges.append({
+                "id": row["link_id"],
+                "source": row["a_case_id"],
+                "target": row["b_case_id"],
+                "relationship_type": "synthetic_benchmark_link",
+                "status": row["link_state"] or "unspecified",
+                "score": (
+                    float(row["link_score"])
+                    if row["link_score"] is not None
+                    else None
+                ),
+                "tier": row["link_tier"],
+                "scope": row["link_scope"],
+                "reasons": row["link_reasons"] or [],
+                "note": row["link_note"],
+                "decided_at": row["decided_at"],
+                "requires_human_review": (
+                    row["link_state"] not in {"confirmed", "accepted"}
+                ),
+                "is_synthetic": True,
+            })
+
+        return {
+            "mode": "benchmark",
+            "is_synthetic": True,
+            "nodes": list(nodes_by_id.values()),
+            "edges": edges,
+            "node_count": len(nodes_by_id),
+            "edge_count": len(edges),
+            "limit": limit,
+            "notice": (
+                "SYNTHETIC BENCHMARK PREVIEW — not live institutional data. "
+                "Scores are not probabilities. All links require appropriate "
+                "interpretation; do not use as evidence of real cases."
+            ),
+        }
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Failed to retrieve dependency benchmark")
+        raise HTTPException(
+            status_code=503,
+            detail="The dependency benchmark could not be retrieved",
+        ) from None
+        
 @app.post("/api/v1/overlaps/semantic-check")
 def semantic_check_api(
     request: SemanticCheckRequest,

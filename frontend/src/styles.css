@@ -44,3 +44,22 @@ body { zoom: var(--font-scale, 1); }
 .dark-mode .modal-body{background:#142334}
 .dark-mode .high-contrast{filter:none}
 @media(max-width:760px){.auth-card{padding:24px}.auth-card h1{font-size:24px}}
+
+/* Government portal language control */
+.language-control{display:inline-flex;align-items:center;gap:6px;min-height:30px;padding:0 8px;border:1px solid rgba(255,255,255,.32);border-radius:6px;color:inherit;background:rgba(255,255,255,.06)}
+.language-control select{max-width:145px;border:0;outline:0;color:inherit;background:transparent;font:inherit;font-size:12px;cursor:pointer}
+.language-control option{color:#123047;background:#fff}
+.gov-right{gap:8px;flex-wrap:wrap}
+@media(max-width:720px){.language-control select{max-width:110px}.gov-left span:not(.mini-emblem),.gov-left i{display:none}}
+
+/* Account controls aligned with the language selector in the government strip */
+.account-controls{display:inline-flex;align-items:center;gap:7px;min-height:30px;padding:0 8px;border:1px solid rgba(255,255,255,.28);border-radius:6px;background:rgba(255,255,255,.06);color:#e7f0f8;font-size:10px;max-width:290px}
+.account-email{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.account-logout{display:inline-flex;align-items:center;gap:5px;border:0;border-left:1px solid rgba(255,255,255,.22);padding:4px 0 4px 8px;margin-left:2px;color:#fff;background:transparent;font-size:10px;font-weight:700;white-space:nowrap}
+.account-logout:hover{color:#ffd28a}
+.record-detail-stack{display:grid;gap:14px;padding-top:6px}
+.record-detail-stack>div{min-width:0}
+.record-detail-stack small{font-size:10px;color:#71869b;display:block;margin-bottom:5px}
+.record-detail-stack h3{margin:0;color:#123b5e;font-size:19px}
+.record-detail-stack p{margin:0;color:#294b68;font-size:12px;line-height:1.55;overflow-wrap:anywhere}
+@media(max-width:760px){.account-controls{max-width:100%;}.account-email{max-width:95px}.account-logout span{display:none}.account-logout{padding-left:6px}}
